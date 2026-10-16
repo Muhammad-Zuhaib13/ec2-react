@@ -1,12 +1,16 @@
+
 name: Deploy React Website to EC2
+
 on:
   push:
     branches:
       - main
   workflow_dispatch:
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     env:
       EC2_HOST: ${{ secrets.EC2_HOST }}
       EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
@@ -19,25 +23,51 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '24'
-          cache: npm
 
       - name: Install dependencies and build
         run: |
-          npm ci
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
           npm run build
+
+      - name: Verify build output
+        run: |
+          if [ ! -d dist ]; then
+            echo "Error: dist directory not found."
+            echo "Check your React build configuration."
+            exit 1
+          fi
+
+          ls -la dist/
 
       - name: Configure SSH
         run: |
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
+
           printf '%s\n' "$EC2_SSH_KEY" | tr -d '\r' > ~/.ssh/ec2-react.pem
           chmod 600 ~/.ssh/ec2-react.pem
+
           ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts
 
       - name: Copy build to EC2
         run: |
-          ssh -i ~/.ssh/ec2-react.pem "ec2-user@$EC2_HOST" \
+          ssh -i ~/.ssh/ec2-react.pem \
+            "ec2-user@$EC2_HOST" \
             'mkdir -p /home/ec2-user/ec2-react/dist'
 
           scp -i ~/.ssh/ec2-react.pem -r dist/. \
             "ec2-user@$EC2_HOST:/home/ec2-user/ec2-react/dist/"
+
+      - name: Verify deployment
+        run: |
+          ssh -i ~/.ssh/ec2-react.pem \
+            "ec2-user@$EC2_HOST" \
+            'echo "EC2 hostname:" &&
+             hostname &&
+             echo "Deployed files:" &&
+             ls -la /home/ec2-user/ec2-react/dist/'
